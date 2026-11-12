@@ -10,14 +10,10 @@ EAN-13 and Code 128 need nothing beyond GIMP. QR codes need the `qrcode` Python 
 
 ## Install
 
-GIMP wants the plug-in in a folder of the same name:
-
 ```sh
-mkdir -p ~/.config/GIMP/3.2/plug-ins/gimp-barcode
-ln -s "$PWD/gimp-barcode.py" ~/.config/GIMP/3.2/plug-ins/gimp-barcode/
-chmod +x gimp-barcode.py
+./install.sh
 ```
 
-Restart GIMP. `python3 gimp-barcode.py test` runs the EAN-13 and Code 128 self-checks.
+This copies the plug-in to `~/.local/share/gimp-barcode` and links it into GIMP's plug-in folder, so the clone can be moved or deleted afterwards. Rerun it after pulling updates. Restart GIMP. `python3 gimp-barcode.py test` runs the EAN-13 and Code 128 self-checks.
 
 Originally a GIMP 2 QR plug-in by Isman Siete (2016).
