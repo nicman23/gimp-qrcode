@@ -101,6 +101,51 @@ def make_ean13(code, module, height, show_text, color, back):
     return image
 
 
+# Code 128 bar/space widths for symbol values 0-105, then the stop pattern.
+CODE128 = """
+212222 222122 222221 121223 121322 131222 122213 122312 132212 221213 221312 231212 112232
+122132 122231 113222 123122 123221 223211 221132 221231 213212 223112 312131 311222 321122
+321221 312212 322112 322211 212123 212321 232121 111323 131123 131321 112313 132113 132311
+211313 231113 231311 112133 112331 132131 113123 113321 133121 313121 211331 231131 213113
+213311 213131 311123 311321 331121 312113 312311 332111 314111 221411 431111 111224 111422
+121124 121421 141122 141221 112214 112412 122114 122411 142112 142211 241211 221114 413111
+241112 134111 111242 121142 121241 114212 124112 124211 411212 421112 421211 212141 214121
+412121 111143 111341 131141 114113 114311 411113 411311 113141 114131 311141 411131 211412
+211214 211232 2331112""".split()
+START_B, START_C = 104, 105
+
+
+def code128_modules(text):
+    """Bar pattern ('1' = bar) for text: code set C for an even run of digits, else set B."""
+    if not text:
+        raise ValueError("Code 128 needs some text")
+    if text.isdigit() and len(text) % 2 == 0:
+        values = [START_C] + [int(text[i:i + 2]) for i in range(0, len(text), 2)]
+    elif all(32 <= ord(c) <= 126 for c in text):
+        values = [START_B] + [ord(c) - 32 for c in text]
+    else:
+        raise ValueError("Code 128 (set B) takes printable ASCII only")
+    check = (values[0] + sum(i * v for i, v in enumerate(values) if i)) % 103
+    widths = "".join(CODE128[v] for v in values + [check]) + CODE128[-1]
+    return "".join(("1" if i % 2 == 0 else "0") * int(w) for i, w in enumerate(widths))
+
+
+def make_code128(text, module, height, show_text, color, back):
+    bits = code128_modules(text)
+    quiet = 10  # modules each side
+    text_px = round(module * 9) if show_text else 0
+    image, layer = new_image((2 * quiet + len(bits)) * module, height + text_px + 2 * module, back)
+    fill_rects(image, layer, [((quiet + i) * module, module, module, height)
+                              for i, b in enumerate(bits) if b == "1"], color)
+    if show_text:
+        tl = Gimp.TextLayer.new(image, text, Gimp.Font.get_by_name("Sans-serif"), text_px, Gimp.Unit.pixel())
+        image.insert_layer(tl, None, 0)
+        tl.set_color(color)
+        tl.set_offsets(round((image.get_width() - tl.get_width()) / 2), module + height)
+        image.flatten()
+    return image
+
+
 def make_qr(text, module, border, correction, color, back):
     import qrcode
     qr = qrcode.QRCode(error_correction=getattr(qrcode.constants, "ERROR_CORRECT_" + correction),
@@ -121,7 +166,7 @@ class Barcode(Gimp.PlugIn):
         return False
 
     def do_query_procedures(self):
-        return ["python-fu-ean13", "python-fu-qrcode"]
+        return ["python-fu-ean13", "python-fu-code128", "python-fu-qrcode"]
 
     def do_create_procedure(self, name):
         procedure = Gimp.Procedure.new(self, name, Gimp.PDBProcType.PLUGIN, self.run, None)
@@ -138,9 +183,12 @@ class Barcode(Gimp.PlugIn):
             procedure.set_documentation("Create an EAN-13 barcode",
                                         "12 digits (check digit added) or 13 digits (check digit verified)", name)
             procedure.add_string_argument("code", "_Code", "12 or 13 digits", "590123412345", rw)
-            procedure.add_int_argument("module", "_Module width (px)", "Width of the narrowest bar", 1, 100, 4, rw)
-            procedure.add_int_argument("height", "Bar _height (px)", "Bar height", 10, 10000, 250, rw)
-            procedure.add_boolean_argument("show-text", "Show _digits", "Print the digits under the bars", True, rw)
+        elif name == "python-fu-code128":
+            procedure.set_menu_label("Code _128 Barcode...")
+            procedure.add_menu_path("<Image>/File/Create")
+            procedure.set_documentation("Create a Code 128 barcode",
+                                        "Printable ASCII text (code set B; even-length digit strings use set C)", name)
+            procedure.add_string_argument("code", "_Text", "Text to encode", "Hello 2026", rw)
         else:
             procedure.set_menu_label("_QR Code...")
             procedure.add_menu_path("<Image>/File/Create")
@@ -154,6 +202,10 @@ class Barcode(Gimp.PlugIn):
             procedure.add_choice_argument("correction", "_Error correction", "Error correction level",
                                           correction, "Q", rw)
 
+        if name != "python-fu-qrcode":
+            procedure.add_int_argument("module", "_Module width (px)", "Width of the narrowest bar", 1, 100, 4, rw)
+            procedure.add_int_argument("height", "Bar _height (px)", "Bar height", 10, 10000, 250, rw)
+            procedure.add_boolean_argument("show-text", "Show te_xt", "Print the text under the bars", True, rw)
         procedure.add_color_argument("color", "_Foreground", "Bar color", False, black, rw)
         procedure.add_color_argument("back", "B_ackground", "Background color", False, white, rw)
         procedure.add_image_return_value("image", "Image", "The new image", False, rw)
@@ -180,6 +232,8 @@ class Barcode(Gimp.PlugIn):
             if procedure.get_name() == "python-fu-ean13":
                 image = make_ean13(ean13_normalize(p("code")), p("module"), p("height"),
                                    p("show-text"), color, back)
+            elif procedure.get_name() == "python-fu-code128":
+                image = make_code128(p("code"), p("module"), p("height"), p("show-text"), color, back)
             else:
                 image = make_qr(p("text"), p("module"), p("border"), p("correction"),
                                 color, back)
@@ -207,6 +261,14 @@ if __name__ == "__main__":
                 pass
         m = ean13_modules("5901234123457")
         assert len(m) == 95 and m.startswith("101") and m[45:50] == "01010"
+        assert len(CODE128) == 107 and all(sum(map(int, w)) == 11 for w in CODE128[:-1])
+        assert len(code128_modules("1234")) == 11 * 4 + 13  # set C: start, 2 pairs, check, stop
+        for bad in ("", "café"):
+            try:
+                code128_modules(bad)
+                raise AssertionError(bad)
+            except ValueError:
+                pass
         print("ok")
     else:
         Gimp.main(Barcode.__gtype__, sys.argv)
